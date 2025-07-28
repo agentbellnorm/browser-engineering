@@ -1,3 +1,6 @@
+use rustls::{ClientConfig, ClientConnection, StreamOwned};
+use std::io::ErrorKind;
+use std::sync::Arc;
 use std::{
     collections::HashMap,
     error::Error,
@@ -19,20 +22,11 @@ pub struct Response {
 }
 
 pub fn get(url: URL) -> Result<Response, Box<dyn Error>> {
-    let URL { path, host, .. } = url;
-
-    let mut stream = TcpStream::connect(&format!("{host}:80")).unwrap();
-
-    let mut request = String::new();
-
-    request.push_str(&format!("GET {path} HTTP/1.0\r\n"));
-    request.push_str(&format!("Host: {host}\r\n"));
-    request.push_str(&format!("\r\n"));
-
-    let _ = stream.write_all(request.as_bytes());
-
-    let mut response = String::new();
-    let _ = stream.read_to_string(&mut response)?;
+    let response = match url.scheme.as_str() {
+        "http" => get_http_response(url),
+        "https" => get_https_response(url),
+        _ => Err("unsupported scheme".into()),
+    }?;
 
     println!("BEGIN RESPONSE:");
     println!("{response}");
@@ -67,6 +61,85 @@ pub fn get(url: URL) -> Result<Response, Box<dyn Error>> {
         body: response_lines.next().map(|rest| rest.trim().to_string()),
         headers,
     })
+}
+
+fn get_http_response(url: URL) -> Result<String, Box<dyn Error>> {
+    let URL {
+        path, host, port, ..
+    } = url;
+
+    let port_to_use = port.unwrap_or("80".to_string());
+
+    let mut stream = TcpStream::connect(&format!("{host}:{port_to_use}")).unwrap();
+
+    let mut request = String::new();
+
+    request.push_str(&format!("GET {path} HTTP/1.0\r\n"));
+    request.push_str(&format!("Host: {host}\r\n"));
+    request.push_str(&format!("\r\n"));
+
+    let _ = stream.write_all(request.as_bytes());
+
+    let mut response = String::new();
+    let _ = stream.read_to_string(&mut response)?;
+
+    Ok(response)
+}
+
+fn get_https_response(url: URL) -> Result<String, Box<dyn Error>> {
+    let URL {
+        path, host, port, ..
+    } = url;
+
+    let port_to_use = port.unwrap_or("443".to_string());
+    let domain = format!("{host}:{port_to_use}");
+
+    let mut request = String::new();
+    request.push_str(&format!("GET {path} HTTP/1.0\r\n"));
+    request.push_str(&format!("Host: {host}\r\n"));
+    request.push_str(&format!("\r\n"));
+
+    // Step 1: Prepare root certificates
+    let root_store =
+        rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+
+    // Step 2: Build TLS client config
+    let config = rustls::ClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+
+    let config = Arc::new(config);
+    // Step 3: Connect TCP stream
+    let tcp_stream = TcpStream::connect(domain.clone()).map_err(|e| {
+        println!("could not create tcp connection: {e}");
+        e
+    })?;
+
+    // Step 4: Create TLS connection
+    let server_name = host.try_into()?;
+    let tls_conn = ClientConnection::new(config, server_name).map_err(|e| {
+        println!("could not create tls connection: {e}");
+        e
+    })?;
+
+    let mut tls_stream = StreamOwned::new(tls_conn, tcp_stream);
+
+    tls_stream.write_all(request.as_bytes()).map_err(|e| {
+        println!("could not write to stream: {e}");
+        e
+    })?;
+
+    let mut response = Vec::new();
+
+    match tls_stream.read_to_end(&mut response) {
+        Ok(_) => {}
+        Err(e) if e.kind() == ErrorKind::UnexpectedEof => {
+            // harmless - the server closed without close_notify
+        }
+        Err(e) => return Err(e.into()),
+    }
+
+    Ok(String::from_utf8_lossy(&response).to_string())
 }
 
 fn split_response_status_line(

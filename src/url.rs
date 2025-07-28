@@ -4,7 +4,7 @@
 pub struct URL {
     pub scheme: String,
     pub host: String,
-    pub port: Option<u16>,
+    pub port: Option<String>,
     pub path: String,
     pub query: Option<String>,
 }
