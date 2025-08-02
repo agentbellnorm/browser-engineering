@@ -14,10 +14,8 @@ fn main() {
         println!("no url passed to args: {:?}", args);
     }
 
-    let url = URL::parse(url_from_commandline.unwrap()).unwrap();
-    println!("{:?}", url);
 
-    let response = get(&url, None, None).unwrap();
+    let response = get(url_from_commandline.unwrap().clone(), None).unwrap();
     println!("response: {:?}", response);
 
     if let Some(body) = response.body {

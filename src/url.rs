@@ -1,4 +1,6 @@
-#[derive(Debug)]
+use std::error::Error;
+
+#[derive(Debug, Clone)]
 pub struct URL {
     pub scheme: String,
     pub host: String,
@@ -8,7 +10,7 @@ pub struct URL {
 }
 
 impl URL {
-    pub fn parse(raw: &str) -> Result<URL, &'static str> {
+    pub fn parse(raw: &str) -> Result<URL, Box<dyn Error>> {
         let mut parts1 = raw.splitn(2, "://");
         let (scheme, rest1) = (parts1.next(), parts1.next());
 
@@ -31,7 +33,7 @@ impl URL {
             }
         }
 
-        Err("could not parse url")
+        Err(format!("could not parse url: {raw}").into())
     }
 
     pub fn domain(&self) -> String {
