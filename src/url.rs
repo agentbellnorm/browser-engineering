@@ -1,5 +1,3 @@
-
-
 #[derive(Debug)]
 pub struct URL {
     pub scheme: String,
@@ -34,6 +32,18 @@ impl URL {
         }
 
         Err("could not parse url")
+    }
+
+    pub fn domain(&self) -> String {
+        let port_to_use = match self.scheme.as_str() {
+            "http" => self.port.clone().unwrap_or("80".to_string()),
+            "https" => self.port.clone().unwrap_or("443".to_string()),
+            _ => todo!("unsupported scheme"),
+        };
+
+        let host = self.host.clone();
+
+        format!("{host}:{port_to_use}")
     }
 }
 

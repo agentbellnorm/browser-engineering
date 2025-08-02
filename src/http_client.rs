@@ -1,13 +1,11 @@
-use rustls::{ClientConfig, ClientConnection, StreamOwned};
+use rustls::{ClientConnection, StreamOwned};
 use std::io::ErrorKind;
 use std::sync::Arc;
 use std::{
     collections::HashMap,
     error::Error,
     io::{Read, Write},
-    iter::Map,
     net::TcpStream,
-    slice::SplitN,
 };
 
 use crate::url::URL;
@@ -21,10 +19,26 @@ pub struct Response {
     pub headers: HashMap<String, String>,
 }
 
-pub fn get(url: URL) -> Result<Response, Box<dyn Error>> {
+type Headers = HashMap<String, String>;
+
+pub fn post(
+    url: URL,
+    body: Option<String>,
+    headers: Option<Headers>,
+) -> Result<Response, Box<dyn Error>> {
+    todo!()
+}
+
+pub fn get(
+    url: &URL,
+    body: Option<String>,
+    headers: Option<Headers>,
+) -> Result<Response, Box<dyn Error>> {
+    let raw_request = raw_http_request(&url, body, headers);
+
     let response = match url.scheme.as_str() {
-        "http" => get_http_response(url),
-        "https" => get_https_response(url),
+        "http" => get_http_response(&raw_request, &url),
+        "https" => get_https_response(&raw_request, &url),
         _ => Err("unsupported scheme".into()),
     }?;
 
@@ -63,20 +77,9 @@ pub fn get(url: URL) -> Result<Response, Box<dyn Error>> {
     })
 }
 
-fn get_http_response(url: URL) -> Result<String, Box<dyn Error>> {
-    let URL {
-        path, host, port, ..
-    } = url;
-
-    let port_to_use = port.unwrap_or("80".to_string());
-
-    let mut stream = TcpStream::connect(&format!("{host}:{port_to_use}")).unwrap();
-
-    let mut request = String::new();
-
-    request.push_str(&format!("GET {path} HTTP/1.0\r\n"));
-    request.push_str(&format!("Host: {host}\r\n"));
-    request.push_str(&format!("\r\n"));
+fn get_http_response(request: &str, url: &URL) -> Result<String, Box<dyn Error>> {
+    let domain = url.domain();
+    let mut stream = TcpStream::connect(domain).unwrap();
 
     let _ = stream.write_all(request.as_bytes());
 
@@ -86,19 +89,8 @@ fn get_http_response(url: URL) -> Result<String, Box<dyn Error>> {
     Ok(response)
 }
 
-fn get_https_response(url: URL) -> Result<String, Box<dyn Error>> {
-    let URL {
-        path, host, port, ..
-    } = url;
-
-    let port_to_use = port.unwrap_or("443".to_string());
-    let domain = format!("{host}:{port_to_use}");
-
-    let mut request = String::new();
-    request.push_str(&format!("GET {path} HTTP/1.0\r\n"));
-    request.push_str(&format!("Host: {host}\r\n"));
-    request.push_str(&format!("\r\n"));
-
+fn get_https_response(request: &str, url: &URL) -> Result<String, Box<dyn Error>> {
+    //
     // Step 1: Prepare root certificates
     let root_store =
         rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
@@ -110,13 +102,13 @@ fn get_https_response(url: URL) -> Result<String, Box<dyn Error>> {
 
     let config = Arc::new(config);
     // Step 3: Connect TCP stream
-    let tcp_stream = TcpStream::connect(domain.clone()).map_err(|e| {
+    let tcp_stream = TcpStream::connect(url.domain()).map_err(|e| {
         println!("could not create tcp connection: {e}");
         e
     })?;
 
     // Step 4: Create TLS connection
-    let server_name = host.try_into()?;
+    let server_name = url.host.clone().try_into()?;
     let tls_conn = ClientConnection::new(config, server_name).map_err(|e| {
         println!("could not create tls connection: {e}");
         e
@@ -159,4 +151,23 @@ fn split_response_status_line(
     }
 
     Err("status line was None".into())
+}
+
+fn raw_http_request(url: &URL, body: Option<String>, headers: Option<Headers>) -> String {
+    let URL { path, host, .. } = url;
+
+    let mut request = String::new();
+
+    let user_agent = headers
+        .as_ref()
+        .and_then(|h| h.get("user-agent").map(|u| u.as_str()))
+        .unwrap_or("Mozilla/5.0 (compatible; MyBrowser/1.0; +https://github.com/agentbellnorm/browser-engineering)");
+
+    request.push_str(&format!("GET {path} HTTP/1.1\r\n"));
+    request.push_str(&format!("Host: {host}\r\n"));
+    request.push_str(&format!("Connection: close\r\n"));
+    request.push_str(&format!("User-Agent: {user_agent}\r\n"));
+    request.push_str(&format!("\r\n"));
+
+    request
 }

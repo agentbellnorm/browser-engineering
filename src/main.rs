@@ -17,7 +17,7 @@ fn main() {
     let url = URL::parse(url_from_commandline.unwrap()).unwrap();
     println!("{:?}", url);
 
-    let response = get(url).unwrap();
+    let response = get(&url, None, None).unwrap();
     println!("response: {:?}", response);
 
     if let Some(body) = response.body {
