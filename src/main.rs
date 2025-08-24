@@ -4,8 +4,12 @@ mod url;
 #[path = "utils/winit_app.rs"]
 mod winit_app;
 
+#[path = "utils/fonts.rs"]
+mod fonts;
+
+use fonts::{BrowserFont, FontAndMetadata, FontStyle, FontWeight};
 use http_client::get;
-use rusttype::{Font, Scale, point};
+use rusttype::{Scale, point};
 use softbuffer::{Context, Surface};
 use std::{env, num::NonZeroU32};
 use winit::{
@@ -41,11 +45,10 @@ fn main() {
 
     let event_loop = EventLoop::new().unwrap();
     let softbuffer_context = Context::new(event_loop.owned_display_handle()).unwrap();
-
-    let font_data = include_bytes!("./B612-Regular.ttf");
-    let font = Font::try_from_bytes(font_data).unwrap();
     let scale = Scale::uniform(50.0);
-    let v_metrics = font.v_metrics(scale);
+
+    let mut current_font = BrowserFont::load(scale).expect("failed to load fonts");
+
     let line_height: f32 = 1.5;
 
     let app = winit_app::WinitAppBuilder::with_init(
@@ -80,20 +83,21 @@ fn main() {
                     return;
                 };
                 let size = window.inner_size();
-                let space_width = font
-                    .glyph(' ')
-                    .scaled(scale)
-                    .h_metrics()
-                    .advance_width
-                    .floor() as i32;
+
                 println!("{}, {}", size.width, size.height);
                 let mut buffer = surface.buffer_mut().unwrap();
 
                 let mut cursor_x: i32 = 0;
-                let mut cursor_y: i32 = v_metrics.ascent.floor() as i32;
+                let mut cursor_y: i32 = current_font.current_height();
 
                 for token in &tokens {
                     println!("token: {:?}", token);
+                    let FontAndMetadata {
+                        font,
+                        v_metrics,
+                        space_width,
+                    } = current_font.get_font_and_metadata();
+
                     match token {
                         Node::Text(text) => {
                             for word in text.split_whitespace() {
@@ -147,7 +151,13 @@ fn main() {
                                 cursor_x = cursor_x + word_width + space_width;
                             }
                         }
-                        Node::Tag(_) => {},
+                        Node::Tag(val) if val == "i" => current_font.set_style(FontStyle::Italic),
+                        Node::Tag(val) if val == "/i" => current_font.set_style(FontStyle::Roman),
+                        Node::Tag(val) if val == "b" => current_font.set_weight(FontWeight::Bold),
+                        Node::Tag(val) if val == "/b" => {
+                            current_font.set_weight(FontWeight::Normal)
+                        }
+                        Node::Tag(_) => println!("unknown tag"),
                     }
                 }
 
