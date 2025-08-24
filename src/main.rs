@@ -5,17 +5,13 @@ mod url;
 mod winit_app;
 
 use http_client::get;
-use log::info;
 use rusttype::{Font, Scale, point};
 use softbuffer::{Context, Surface};
 use std::{env, num::NonZeroU32};
 use winit::{
-    application::ApplicationHandler,
-    dpi::LogicalSize,
     event::{Event, KeyEvent, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     keyboard::{Key, NamedKey},
-    window::Window,
 };
 
 const WIDTH: u32 = 800;
@@ -40,8 +36,8 @@ fn main() {
     println!("response: {:?}", response);
 
     // render page
-    let to_render = lex(response.body);
-    println!("lexed: {}", to_render.as_ref().unwrap());
+    let tokens = lex(response.body);
+    println!("tokens: {:?}", tokens);
 
     let event_loop = EventLoop::new().unwrap();
     let softbuffer_context = Context::new(event_loop.owned_display_handle()).unwrap();
@@ -93,54 +89,66 @@ fn main() {
                 println!("{}, {}", size.width, size.height);
                 let mut buffer = surface.buffer_mut().unwrap();
 
-                let words = to_render.as_ref().unwrap().split_whitespace();
-
                 let mut cursor_x: i32 = 0;
                 let mut cursor_y: i32 = v_metrics.ascent.floor() as i32;
 
-                for word in words {
-                    let glyphs: Vec<_> = font.layout(&word, scale, point(0.0, 0.0)).collect();
-                    println!("w: {}", word);
+                for token in &tokens {
+                    println!("token: {:?}", token);
+                    match token {
+                        Node::Text(text) => {
+                            for word in text.split_whitespace() {
+                                let glyphs: Vec<_> =
+                                    font.layout(&word, scale, point(0.0, 0.0)).collect();
 
-                    let word_width = glyphs
-                        .iter()
-                        .rev()
-                        .map(|g| g.position().x as f32 + g.unpositioned().h_metrics().advance_width)
-                        .next()
-                        .unwrap_or(0.0)
-                        .floor() as i32;
+                                let word_width = glyphs
+                                    .iter()
+                                    .rev()
+                                    .map(|g| {
+                                        g.position().x as f32
+                                            + g.unpositioned().h_metrics().advance_width
+                                    })
+                                    .next()
+                                    .unwrap_or(0.0)
+                                    .floor()
+                                    as i32;
 
-                    println!("cursor_x {}, cursor_y {}", cursor_x, cursor_y);
-                    for glyph in glyphs {
-                        if let Some(bounds) = glyph.pixel_bounding_box() {
-                            // let w = bounds.width();
-                            if cursor_x + word_width >= (size.width as i32) {
-                                cursor_x = 0;
-                                cursor_y = cursor_y + (v_metrics.ascent.ceil() * line_height) as i32;
-                            }
+                                println!("cursor_x {}, cursor_y {}", cursor_x, cursor_y);
+                                for glyph in glyphs {
+                                    if let Some(bounds) = glyph.pixel_bounding_box() {
+                                        // let w = bounds.width();
+                                        if cursor_x + word_width >= (size.width as i32) {
+                                            cursor_x = 0;
+                                            cursor_y = cursor_y
+                                                + (v_metrics.ascent.ceil() * line_height) as i32;
+                                        }
 
-                            glyph.draw(|x, y, v| {
-                                let x = cursor_x + x as i32 + bounds.min.x;
-                                let y = cursor_y + y as i32 + bounds.min.y;
-                                let index = y as i32 * size.width as i32 + x;
-                                let (red, blue, green) = (
-                                    (255.0 * v).round() as u32,
-                                    (255.0 * v).round() as u32,
-                                    (255.0 * v).round() as u32,
-                                );
+                                        glyph.draw(|x, y, v| {
+                                            let x = cursor_x + x as i32 + bounds.min.x;
+                                            let y = cursor_y + y as i32 + bounds.min.y;
+                                            let index = y as i32 * size.width as i32 + x;
+                                            let (red, blue, green) = (
+                                                (255.0 * v).round() as u32,
+                                                (255.0 * v).round() as u32,
+                                                (255.0 * v).round() as u32,
+                                            );
 
-                                if index >= buffer.len().try_into().unwrap() {
-                                    // not drawing outside of buffer if content doesnt fit
-                                    return;
+                                            if index >= buffer.len().try_into().unwrap() {
+                                                // not drawing outside of buffer if content doesnt fit
+                                                return;
+                                            }
+
+                                            buffer[index as usize] =
+                                                blue | (green << 8) | (red << 16);
+                                        });
+                                    } else {
+                                        println!("no bb");
+                                    }
                                 }
-
-                                buffer[index as usize] = blue | (green << 8) | (red << 16);
-                            });
-                        } else {
-                            println!("no bb");
+                                cursor_x = cursor_x + word_width + space_width;
+                            }
                         }
+                        Node::Tag(_) => {},
                     }
-                    cursor_x = cursor_x + word_width + space_width;
                 }
 
                 buffer.present().unwrap();
@@ -167,26 +175,53 @@ fn main() {
     winit_app::run_app(event_loop, app);
 }
 
+#[derive(Debug, PartialEq)]
+enum Node {
+    Text(String),
+    Tag(String),
+}
+
 #[test]
 fn test_lex() {
-    assert_eq!(lex(Some("<p>hej</p>".into())), Some("hej".into()))
+    assert_eq!(
+        lex(Some("<p>hej</p>".into())),
+        vec![
+            Node::Tag("p".to_string()),
+            Node::Text("hej".to_string()),
+            Node::Tag("/p".to_string())
+        ]
+    )
 }
-fn lex(body: Option<String>) -> Option<String> {
+fn lex(body: Option<String>) -> Vec<Node> {
+    let mut out: Vec<Node> = Vec::new();
     if let Some(body) = body {
-        let mut lexed = String::new();
+        let mut buffer = String::new();
         let mut in_tag = false;
 
         for char in body.chars() {
             match (char, in_tag) {
-                ('<', _) => in_tag = true,
-                ('>', _) => in_tag = false,
-                (c, false) => {
-                    lexed.push(c);
+                ('<', _) => {
+                    in_tag = true;
+                    if !buffer.is_empty() {
+                        out.push(Node::Text(buffer));
+                    }
+                    buffer = String::new();
                 }
-                _ => {}
+                ('>', _) => {
+                    in_tag = false;
+                    out.push(Node::Tag(buffer));
+                    buffer = String::new();
+                }
+                (c, _) => {
+                    buffer.push(c);
+                }
             }
         }
-        return Some(lexed);
+
+        if in_tag == false && !buffer.is_empty() {
+            out.push(Node::Text(buffer));
+        }
     }
-    None
+
+    return out;
 }
