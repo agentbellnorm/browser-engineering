@@ -50,6 +50,7 @@ fn main() {
     let font = Font::try_from_bytes(font_data).unwrap();
     let scale = Scale::uniform(50.0);
     let v_metrics = font.v_metrics(scale);
+    let line_height: f32 = 1.5;
 
     let app = winit_app::WinitAppBuilder::with_init(
         |elwt| winit_app::make_window(elwt, |w| w),
@@ -113,9 +114,9 @@ fn main() {
                     for glyph in glyphs {
                         if let Some(bounds) = glyph.pixel_bounding_box() {
                             // let w = bounds.width();
-                            if cursor_x + word_width + space_width >= (size.width as i32) {
+                            if cursor_x + word_width >= (size.width as i32) {
                                 cursor_x = 0;
-                                cursor_y = cursor_y + v_metrics.ascent.ceil() as i32;
+                                cursor_y = cursor_y + (v_metrics.ascent.ceil() * line_height) as i32;
                             }
 
                             glyph.draw(|x, y, v| {
