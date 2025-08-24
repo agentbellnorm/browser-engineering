@@ -148,17 +148,17 @@ fn do_http_request(request: &str, url: &URL) -> Result<String, Box<dyn Error>> {
 
 fn do_https_request(request: &str, url: &URL) -> Result<String, Box<dyn Error>> {
     //
-    // Step 1: Prepare root certificates
+    // prepare root certificates
     let root_store =
         rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
 
-    // Step 2: Build TLS client config
+    // build TLS client config
     let config = rustls::ClientConfig::builder()
         .with_root_certificates(root_store)
         .with_no_client_auth();
 
     let config = Arc::new(config);
-    // Step 3: Connect TCP stream
+    // connect TCP stream
     let tcp_stream = TcpStream::connect(url.domain()).map_err(|e| {
         println!("could not create tcp connection: {e}");
         e
@@ -166,7 +166,7 @@ fn do_https_request(request: &str, url: &URL) -> Result<String, Box<dyn Error>> 
 
     println!("tcp connected");
 
-    // Step 4: Create TLS connection
+    // create TLS connection
     let server_name = url.host.clone().try_into()?;
     let tls_conn = ClientConnection::new(config, server_name).map_err(|e| {
         println!("could not create tls connection: {e}");
