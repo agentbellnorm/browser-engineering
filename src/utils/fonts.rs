@@ -2,11 +2,13 @@ use std::error::Error;
 
 use rusttype::{Font, Scale, VMetrics};
 
+#[derive(Clone)]
 pub enum FontStyle {
     Roman,
     Italic,
 }
 
+#[derive(Clone)]
 pub enum FontWeight {
     Normal,
     Bold,

@@ -56,7 +56,7 @@ impl URL {
         let mut parts1 = raw.splitn(2, "://");
         let (scheme, rest1) = (parts1.next(), parts1.next());
 
-        if let (Some(s), Some(mut r1)) = (scheme, rest1) {
+        if let (Some(s), Some(r1)) = (scheme, rest1) {
             let r1_fixed = maybe_add_slash(r1);
 
             let mut parts2 = r1_fixed.splitn(2, "/");
